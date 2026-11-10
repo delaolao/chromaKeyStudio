@@ -17,7 +17,7 @@ add_link_options(-Wl,--gc-sections -s)
 
 set(FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/_ffbuild/out" CACHE PATH "minimal ffmpeg build")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 
 # ---------------------------------------------------------------- 核心库
 add_library(ckcore STATIC
@@ -52,7 +52,7 @@ add_executable(ChromaKeyStudio WIN32
     src/ui/previewwidget.cpp
     src/ui/theme.cpp
 )
-target_link_libraries(ChromaKeyStudio PRIVATE ckcore Qt6::Core Qt6::Gui Qt6::Widgets)
+target_link_libraries(ChromaKeyStudio PRIVATE ckcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
 
 # ---------------------------------------------------------------- 无界面导出工具(调试用)
 add_executable(ckcli tests/cli_export.cpp)

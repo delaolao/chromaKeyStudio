@@ -5,7 +5,10 @@
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
+#include <QSvgRenderer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -13,6 +16,102 @@
 
 namespace {
 const char* kRepoUrl = "https://github.com/delaolao/chromaKeyStudio";
+
+// GitHub octocat 标记(SVG path, 16x16 视图框)
+const char* kOctocatPath =
+    "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49"
+    "-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82"
+    ".72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15"
+    "-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82"
+    ".44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2"
+    " 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z";
+
+QPixmap octocatPixmap(const QColor& color, int logicalSize) {
+    const qreal dpr = qApp ? qApp->devicePixelRatio() : 1.0;
+    const int px = qMax(1, static_cast<int>(logicalSize * dpr));
+    const QString svg = QStringLiteral(
+                            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' "
+                            "width='16' height='16'><path fill='%1' d='%2'/></svg>")
+                            .arg(color.name(), QString::fromLatin1(kOctocatPath));
+    QSvgRenderer renderer(svg.toUtf8());
+    QPixmap pm(px, px);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    renderer.render(&p);
+    p.end();
+    pm.setDevicePixelRatio(dpr);
+    return pm;
+}
+
+// 参考开源项目页脚那种小圆角胶囊: 描边 + 图标 + 文字, hover 时变主题绿。
+// 背景/描边自己画, 不走 QSS —— QPushButton 的 border-radius 在 Fusion 下不稳定。
+class GitHubPill : public QPushButton {
+public:
+    GitHubPill(const QColor& text, const QColor& accent, const QColor& border,
+               const QColor& fill, const QColor& fillHover, QWidget* parent = nullptr)
+        : QPushButton(parent),
+          text_(text),
+          accent_(accent),
+          border_(border),
+          fill_(fill),
+          fillHover_(fillHover) {
+        setObjectName(QStringLiteral("githubPill"));
+        setCursor(Qt::PointingHandCursor);
+        setToolTip(QStringLiteral("在浏览器中打开 GitHub 仓库"));
+        setFlat(true);
+        setAttribute(Qt::WA_Hover, true);
+        QFont f = font();
+        f.setPixelSize(11);
+        setFont(f);
+
+        const QFontMetrics fm(f);
+        const int textW = fm.horizontalAdvance(QStringLiteral("GitHub"));
+        setFixedSize(9 + kIcon + 6 + textW + 12, 26);
+        icon_ = octocatPixmap(text_, kIcon);
+        iconHover_ = octocatPixmap(accent_, kIcon);
+        connect(this, &QPushButton::clicked, this, [] {
+            QDesktopServices::openUrl(QUrl(QString::fromLatin1(kRepoUrl)));
+        });
+    }
+
+protected:
+    void enterEvent(QEnterEvent* e) override {
+        hovered_ = true;
+        update();
+        QPushButton::enterEvent(e);
+    }
+    void leaveEvent(QEvent* e) override {
+        hovered_ = false;
+        update();
+        QPushButton::leaveEvent(e);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF r = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+        QPainterPath path;
+        path.addRoundedRect(r, r.height() / 2.0, r.height() / 2.0);
+        p.fillPath(path, hovered_ ? fillHover_ : fill_);
+        p.setPen(QPen(hovered_ ? accent_ : border_, 1));
+        p.drawPath(path);
+
+        p.drawPixmap(9, (height() - kIcon) / 2, hovered_ ? iconHover_ : icon_);
+
+        QFont f = font();
+        p.setFont(f);
+        p.setPen(hovered_ ? accent_ : text_);
+        const QRect textRect(9 + kIcon + 6, 0, width() - (9 + kIcon + 6) - 12, height());
+        p.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
+                   QStringLiteral("GitHub"));
+    }
+
+private:
+    static constexpr int kIcon = 13;
+    QColor text_, accent_, border_, fill_, fillHover_;
+    QPixmap icon_, iconHover_;
+    bool hovered_ = false;
+};
 
 QLabel* bodyLabel(const QString& html) {
     auto* lb = new QLabel(html);
@@ -78,21 +177,13 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
         "完整协议文本见安装目录 <b>LICENSE</b>。</div>")
         .arg(QString::fromLatin1(t.text), muted)));
 
-    // ---- GitHub 胶囊链接
+    // ---- GitHub 胶囊
     auto* linkRow = new QHBoxLayout;
     linkRow->setContentsMargins(0, 6, 0, 0);
-    auto* pill = new QLabel(QStringLiteral(
-        "<a href=\"%1\" style=\"color:%2;text-decoration:none\">"
-        "★&nbsp;&nbsp;delaolao / chromaKeyStudio</a>")
-        .arg(QString::fromLatin1(kRepoUrl), QString::fromLatin1(t.onAccent)));
-    pill->setObjectName(QStringLiteral("githubPill"));
-    pill->setTextFormat(Qt::RichText);
-    pill->setOpenExternalLinks(true);
-    pill->setCursor(Qt::PointingHandCursor);
-    pill->setAlignment(Qt::AlignCenter);
-    pill->setFixedHeight(26);
-    pill->setMinimumWidth(210);
-    linkRow->addWidget(pill);
+    linkRow->addWidget(new GitHubPill(QColor(muted), QColor(accent),
+                                      QColor(QString::fromLatin1(t.border)),
+                                      QColor(QString::fromLatin1(t.panelAlt)),
+                                      QColor(QString::fromLatin1(t.accentSoft)), this));
     linkRow->addStretch(1);
     root->addLayout(linkRow);
 
@@ -113,10 +204,6 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
         "QLabel#aboutTitle { font-size:19px; font-weight:700; color:%1; }"
         "QLabel#aboutVersion { color:%2; font-weight:600; }"
         "QLabel#aboutTag { color:%3; }"
-        "QLabel#aboutBuild { color:%3; font-size:11px; }"
-        "QLabel#githubPill { background:%2; color:%4; border-radius:13px;"
-        "                    padding:0 14px; font-weight:600; }"
-        "QLabel#githubPill a { color:%4; text-decoration:none; }")
-                      .arg(QString::fromLatin1(t.text), accent, muted,
-                           QString::fromLatin1(t.onAccent)));
+        "QLabel#aboutBuild { color:%3; font-size:11px; }")
+                      .arg(QString::fromLatin1(t.text), accent, muted));
 }
