@@ -1,0 +1,16 @@
+﻿# 构建产物
+build/
+out/
+_objcheck/
+_parity/
+
+# 便携包 / 本地 FFmpeg 构建产物（体积大，走 Releases 和 CI）
+portable/
+_ffbuild/
+*.log
+
+# 编辑器
+.vs/
+.vscode/
+*.user
+dist/

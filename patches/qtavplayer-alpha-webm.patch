@@ -1,0 +1,42 @@
+﻿diff --git a/src/QtAVPlayer/qavdemuxer.cpp b/src/QtAVPlayer/qavdemuxer.cpp
+index b882cd3..7e91aae 100644
+--- a/src/QtAVPlayer/qavdemuxer.cpp
++++ b/src/QtAVPlayer/qavdemuxer.cpp
+@@ -222,6 +222,37 @@ static int setup_video_codec(const QString &inputVideoCodec, const QAVStream &st
+     if (videoCodec)
+         codec.setCodec(videoCodec);
+ 
++    // 单流 VP9/VP8-Alpha(WebM 把 alpha 放在 BlockAdditional 旁路里, 并在容器上打
++    // AlphaMode=1)。FFmpeg 自带的 vp9/vp8 解码器不会还原这份旁路 alpha, 解出来
++    // 永远是全不透明; 只有 libvpx 系解码器会输出 yuva420p。这里在调用方没有显式
++    // 指定解码器时自动切换, 并且强制软解 —— 硬件 VP9 解码同样不携带 alpha。
++    if (!videoCodec) {
++        const AVStream *avst = stream.stream();
++        if (avst) {
++            const AVCodecID id = avst->codecpar->codec_id;
++            const bool isVp9 = id == AV_CODEC_ID_VP9;
++            if (isVp9 || id == AV_CODEC_ID_VP8) {
++                AVDictionaryEntry *e =
++                    av_dict_get(avst->metadata, "alpha_mode", nullptr, 0);
++                if (e && e->value && !std::strcmp(e->value, "1")) {
++                    const char *decoderName = isVp9 ? "libvpx-vp9" : "libvpx";
++                    if (const AVCodec *libvpx =
++                            avcodec_find_decoder_by_name(decoderName)) {
++                        qDebug() << "[" << streamInfo.title
++                                 << "] single-stream alpha WebM detected, using"
++                                 << decoderName;
++                        videoCodec = libvpx;
++                        codec.setCodec(videoCodec);
++                        ignoreHW = true;
++                    } else {
++                        qWarning() << "[" << streamInfo.title << "]" << decoderName
++                                   << "decoder unavailable, alpha will be lost";
++                    }
++                }
++            }
++        }
++    }
++
+     // Implemented HW devices
+     QMap<AVHWDeviceType, QSharedPointer<QAVHWDevice>> devices;
+     // Ordered supported devices
