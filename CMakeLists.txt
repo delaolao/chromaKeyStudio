@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ChromaKeyStudio VERSION 0.2.0 LANGUAGES CXX)
+project(ChromaKeyStudio VERSION 0.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,6 +50,7 @@ add_executable(ChromaKeyStudio WIN32
     src/ui/mainwindow.cpp
     src/ui/aboutdialog.cpp
     src/ui/previewwidget.cpp
+    src/ui/themeswitch.cpp
     src/ui/theme.cpp
 )
 target_link_libraries(ChromaKeyStudio PRIVATE ckcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)

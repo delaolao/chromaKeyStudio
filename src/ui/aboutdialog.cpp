@@ -5,6 +5,7 @@
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QKeyEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
@@ -61,6 +62,11 @@ public:
         setToolTip(QStringLiteral("在浏览器中打开 GitHub 仓库"));
         setFlat(true);
         setAttribute(Qt::WA_Hover, true);
+        // 键盘可达: Tab 能进来, 回车/空格能触发
+        setFocusPolicy(Qt::StrongFocus);
+        setAccessibleName(QStringLiteral("GitHub 仓库"));
+        setAutoDefault(false);
+        setDefault(false);
         QFont f = font();
         f.setPixelSize(11);
         setFont(f);
@@ -86,6 +92,21 @@ protected:
         update();
         QPushButton::leaveEvent(e);
     }
+    void keyPressEvent(QKeyEvent* e) override {
+        if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
+            click();
+            return;
+        }
+        QPushButton::keyPressEvent(e);   // 空格由基类处理
+    }
+    void focusInEvent(QFocusEvent* e) override {
+        update();
+        QPushButton::focusInEvent(e);
+    }
+    void focusOutEvent(QFocusEvent* e) override {
+        update();
+        QPushButton::focusOutEvent(e);
+    }
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing, true);
@@ -104,6 +125,16 @@ protected:
         const QRect textRect(9 + kIcon + 6, 0, width() - (9 + kIcon + 6) - 12, height());
         p.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
                    QStringLiteral("GitHub"));
+
+        // 键盘焦点环: 在胶囊外侧再画一圈, 不改变布局
+        if (hasFocus()) {
+            QColor ring = accent_;
+            ring.setAlpha(150);
+            p.setPen(QPen(ring, 2));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(QRectF(rect()).adjusted(2.0, 2.0, -2.0, -2.0),
+                              (r.height() - 3) / 2.0, (r.height() - 3) / 2.0);
+        }
     }
 
 private:

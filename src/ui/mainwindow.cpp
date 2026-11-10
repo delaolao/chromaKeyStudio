@@ -23,6 +23,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QSplitter>
 #include <QStatusBar>
@@ -37,10 +38,11 @@
 #include "core/keying.h"
 #include "aboutdialog.h"
 #include "previewwidget.h"
+#include "themeswitch.h"
 #include "theme.h"
 
 namespace {
-const char* kVersion = "0.2.0";
+const char* kVersion = "0.2.1";
 const char* kAppName = "ChromaKey Studio";
 
 QString fmtTime(double s) {
@@ -195,7 +197,10 @@ MainWindow::MainWindow() {
     QSettings s(QStringLiteral("ChromaKeyStudio"), QStringLiteral("ChromaKeyStudio"));
     const int mode = s.value(QStringLiteral("ui/theme"), 0).toInt();
     setTheme(mode);
-    if (themeActs_[mode]) themeActs_[mode]->setChecked(true);
+    if (themeSwitch_) {
+        QSignalBlocker block(themeSwitch_);
+        themeSwitch_->setMode(mode);
+    }
 
     // 参数默认值(与 Python 版一致)
     params_.keyR = 0;
@@ -244,6 +249,12 @@ void MainWindow::buildUi() {
     lbFile_->setObjectName(QStringLiteral("hint"));
     lbFile_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     topLay->addWidget(lbFile_, 1);
+
+    // 主题切换: 跟随系统 / 浅色 / 深色(样式同 MyPassword 的快捷开关)
+    themeSwitch_ = new ThemeSwitch(top);
+    themeSwitch_->setToolTip(
+        QStringLiteral("主题：跟随系统 / 浅色 / 深色（点击或按 ← → 切换）"));
+    topLay->addWidget(themeSwitch_, 0, Qt::AlignVCenter);
     root->addWidget(top);
 
     auto* split = new QSplitter(Qt::Horizontal, central);
@@ -406,14 +417,6 @@ void MainWindow::buildMenus() {
     actQuit->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
     connect(actQuit, &QAction::triggered, this, &QWidget::close);
 
-    auto* mView = menuBar()->addMenu(QStringLiteral("视图(&V)"));
-    const QString names[3] = {QStringLiteral("跟随系统"), QStringLiteral("浅色"),
-                              QStringLiteral("深色")};
-    for (int i = 0; i < 3; ++i) {
-        themeActs_[i] = mView->addAction(names[i]);
-        themeActs_[i]->setCheckable(true);
-        connect(themeActs_[i], &QAction::triggered, this, [this, i] { setTheme(i); });
-    }
 
     auto* mHelp = menuBar()->addMenu(QStringLiteral("帮助(&H)"));
     connect(mHelp->addAction(QStringLiteral("怎么用")), &QAction::triggered, this,
@@ -447,6 +450,7 @@ void MainWindow::connectSignals() {
     connect(btnCancel_, &QPushButton::clicked, this, &MainWindow::cancelExport);
     connect(timeline_, &QSlider::valueChanged, this, &MainWindow::onTimelineMoved);
     connect(btnPlay_, &QPushButton::toggled, this, &MainWindow::onPlayToggled);
+    connect(themeSwitch_, &ThemeSwitch::modeChanged, this, &MainWindow::setTheme);
 }
 
 // ---------------------------------------------------------------- 打开/预览
@@ -801,8 +805,10 @@ void MainWindow::setTheme(int mode) {
     bool dark = mode == 2;
     if (mode == 0) dark = theme::systemIsDark();
     theme::apply(qApp, dark);
-    for (int i = 0; i < 3; ++i)
-        if (themeActs_[i]) themeActs_[i]->setChecked(i == mode);
+    if (themeSwitch_ && themeSwitch_->mode() != mode) {
+        QSignalBlocker block(themeSwitch_);
+        themeSwitch_->setMode(mode);
+    }
     if (preview_) preview_->update();
 }
 

@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QPushButton>
 #include <QTimer>
 
 #include <cstdio>
@@ -116,7 +117,7 @@ int runSelftest(const QString& input) {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("ChromaKey Studio"));
-    app.setApplicationVersion(QStringLiteral("0.2.0"));
+    app.setApplicationVersion(QStringLiteral("0.2.1"));
     app.setOrganizationName(QStringLiteral("ChromaKeyStudio"));
     app.setStyle(QStringLiteral("Fusion"));
     app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 9));
@@ -140,8 +141,13 @@ int main(int argc, char* argv[]) {
             });
         } else if (args[i] == QLatin1String("--about-shot")) {
             const QString out = args[i + 1];
+            const bool focusPill = args.contains(QLatin1String("--focus"));
             auto* dlg = new AboutDialog(&w);
             dlg->show();
+            if (focusPill) {
+                if (auto* pill = dlg->findChild<QPushButton*>(QStringLiteral("githubPill")))
+                    pill->setFocus(Qt::OtherFocusReason);
+            }
             QTimer::singleShot(1200, [dlg, out] {
                 dlg->grab().save(out);
                 QCoreApplication::quit();

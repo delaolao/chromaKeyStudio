@@ -151,5 +151,5 @@ private:
     QLabel* lbTime_ = nullptr;
     QLabel* lbStats_ = nullptr;
     QAction* actExport_ = nullptr;
-    QAction* themeActs_[3] = {nullptr, nullptr, nullptr};
+    class ThemeSwitch* themeSwitch_ = nullptr;
 };
