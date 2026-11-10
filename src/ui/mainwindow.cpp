@@ -42,7 +42,7 @@
 #include "theme.h"
 
 namespace {
-const char* kVersion = "0.2.1";
+const char* kVersion = "0.2.2";
 const char* kAppName = "ChromaKey Studio";
 
 QString fmtTime(double s) {
@@ -306,8 +306,12 @@ void MainWindow::buildUi() {
     auto* gView = new QGroupBox(QStringLiteral("预览"));
     auto* fView = new QFormLayout(gView);
     cmbRes_ = new QComboBox;
-    cmbRes_->addItems({QStringLiteral("720p (快)"), QStringLiteral("540p"),
-                       QStringLiteral("360p (最快)")});
+    // 不带速度标签: 三项里 720p 其实最慢, 标"快/最快"横着看是矛盾的。
+    // 说明放进 tooltip, 不额外占面板高度。
+    cmbRes_->addItems({QStringLiteral("720p"), QStringLiteral("540p"),
+                       QStringLiteral("360p")});
+    cmbRes_->setToolTip(
+        QStringLiteral("预览分辨率越低越流畅；导出始终使用原分辨率"));
     fView->addRow(QStringLiteral("预览分辨率"), cmbRes_);
     cmbDisplay_ = new QComboBox;
     cmbDisplay_->addItems({QStringLiteral("棋盘格(透明)"), QStringLiteral("黑底"),

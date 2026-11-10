@@ -117,7 +117,7 @@ int runSelftest(const QString& input) {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("ChromaKey Studio"));
-    app.setApplicationVersion(QStringLiteral("0.2.1"));
+    app.setApplicationVersion(QStringLiteral("0.2.2"));
     app.setOrganizationName(QStringLiteral("ChromaKeyStudio"));
     app.setStyle(QStringLiteral("Fusion"));
     app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 9));
