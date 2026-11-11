@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ChromaKeyStudio VERSION 0.2.2 LANGUAGES CXX)
+project(ChromaKeyStudio VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,11 +17,12 @@ add_link_options(-Wl,--gc-sections -s)
 
 set(FFMPEG_ROOT "${CMAKE_SOURCE_DIR}/_ffbuild/out" CACHE PATH "minimal ffmpeg build")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Test)
 
 # ---------------------------------------------------------------- 核心库
 add_library(ckcore STATIC
     src/core/keying.cpp
+    src/core/mask.cpp
     src/core/media.cpp
     src/core/export.cpp
 )
@@ -56,5 +57,11 @@ add_executable(ChromaKeyStudio WIN32
 target_link_libraries(ChromaKeyStudio PRIVATE ckcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
 
 # ---------------------------------------------------------------- 无界面导出工具(调试用)
+add_executable(preview_edit_test tests/preview_edit_test.cpp src/ui/previewwidget.cpp)
+target_link_libraries(preview_edit_test PRIVATE ckcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+
+add_executable(mask_test tests/mask_test.cpp)
+target_link_libraries(mask_test PRIVATE ckcore)
+
 add_executable(ckcli tests/cli_export.cpp)
 target_link_libraries(ckcli PRIVATE ckcore)

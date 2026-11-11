@@ -287,6 +287,11 @@ ExportResult exportVideo(Reader& reader, const ExportOptions& opt,
 
     const int total = std::max(1, static_cast<int>(info.duration * info.fps + 0.5));
     Image keyed;
+
+    // 多边形遮罩是静态的, 按导出分辨率预计算一次, 每帧只做一次查表相乘
+    MaskLayers maskLayers;
+    if (!opt.masks.empty())
+        maskLayers = rasterizeMask(opt.masks, W, H, opt.maskSettings);
     int frames = 0;
     const bool seqOk = reader.startSequential(&res.error);
     if (!seqOk) return fail(res.error.empty() ? "无法开始解码" : res.error);
@@ -300,6 +305,8 @@ ExportResult exportVideo(Reader& reader, const ExportOptions& opt,
         if (done) break;
 
         keyImage(rgb.data.data(), rgb.width, rgb.height, rgb.stride, opt.key, keyed);
+        if (!maskLayers.empty())
+            applyMask(keyed, maskLayers, opt.key.keyR, opt.key.keyG, opt.key.keyB);
 
         // RGBA -> 编码器格式
         av_frame_unref(vframe);

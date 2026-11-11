@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "keying.h"
+#include "mask.h"
 
 struct AVFormatContext;
 struct AVCodecContext;
@@ -123,6 +124,10 @@ struct ExportOptions {
     int crf = 30;        // 仅 WebM
     int speed = 3;       // libvpx -cpu-used
     bool faststart = true;
+
+    // 多边形遮罩(垃圾遮罩): 空表示不用
+    std::vector<MaskPolygon> masks;
+    MaskSettings maskSettings;
 };
 
 struct ExportResult {

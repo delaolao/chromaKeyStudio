@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "core/media.h"
+#include "core/mask.h"
 
 class QLabel;
 class QSlider;
@@ -23,7 +24,9 @@ class PlayThread : public QThread {
     Q_OBJECT
 public:
     PlayThread(const QString& path, QMutex* paramMutex, ck::KeyParams* params,
-               int outW, int outH, double startT, QObject* parent = nullptr);
+               const std::vector<ck::MaskPolygon>* masks,
+               const ck::MaskSettings* maskSettings, int outW, int outH,
+               double startT, QObject* parent = nullptr);
     void stop();
 
 signals:
@@ -37,6 +40,8 @@ private:
     QString path_;
     QMutex* paramMutex_;
     ck::KeyParams* params_;
+    const std::vector<ck::MaskPolygon>* masks_;
+    const ck::MaskSettings* maskSettings_;
     int outW_, outH_;
     double startT_;
     std::atomic<bool> stop_{false};
@@ -69,6 +74,7 @@ public:
     ~MainWindow() override;
 
     bool loadVideo(const QString& path);
+    void setMaskEditEnabledForTest();  // 仅给 --mask-edit 截图用
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -89,6 +95,14 @@ private slots:
     void showAbout();
     void showHelp();
     void setTheme(int mode);  // 0=system 1=light 2=dark
+    void onMaskEditToggled(bool on);
+    void onMaskModeChanged(int idx);
+    void onMaskSettingsChanged();
+    void onMaskEdited();
+    void pushMaskUndo();
+    void undoMask();
+    void clearMasks();
+    void onMaskDrawFinished();
 
 private:
     void buildUi();
@@ -152,4 +166,23 @@ private:
     QLabel* lbStats_ = nullptr;
     QAction* actExport_ = nullptr;
     class ThemeSwitch* themeSwitch_ = nullptr;
+
+    // 多边形遮罩
+    void saveMask();
+    void loadMask();
+    void updateMaskInfo();
+    std::vector<ck::MaskPolygon> masks_;
+    ck::MaskSettings maskSettings_;
+    std::vector<std::pair<std::vector<ck::MaskPolygon>, ck::MaskSettings>> maskHistory_;
+    ck::MaskLayers previewMask_;
+    bool previewMaskDirty_ = true;
+    QCheckBox* cbMaskEdit_ = nullptr;
+    QComboBox* cmbMaskMode_ = nullptr;
+    QSlider* slMaskFeather_ = nullptr;
+    QSlider* slMaskExpand_ = nullptr;
+    QLabel* lbMaskFeather_ = nullptr;
+    QLabel* lbMaskExpand_ = nullptr;
+    QLabel* lbMaskInfo_ = nullptr;
+    QPushButton* btnMaskUndo_ = nullptr;
+    QPushButton* btnMaskClear_ = nullptr;
 };

@@ -117,7 +117,7 @@ int runSelftest(const QString& input) {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("ChromaKey Studio"));
-    app.setApplicationVersion(QStringLiteral("0.2.2"));
+    app.setApplicationVersion(QStringLiteral("0.3.0"));
     app.setOrganizationName(QStringLiteral("ChromaKeyStudio"));
     app.setStyle(QStringLiteral("Fusion"));
     app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 9));
@@ -133,6 +133,8 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i + 1 < args.size(); ++i) {
         if (args[i] == QLatin1String("--open"))
             w.loadVideo(args[i + 1]);
+        else if (args[i] == QLatin1String("--mask-edit"))
+            w.setMaskEditEnabledForTest();
         else if (args[i] == QLatin1String("--screenshot")) {
             const QString out = args[i + 1];
             QTimer::singleShot(2500, [&w, out] {

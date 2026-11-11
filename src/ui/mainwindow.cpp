@@ -32,6 +32,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <cstring>
 
@@ -42,7 +43,7 @@
 #include "theme.h"
 
 namespace {
-const char* kVersion = "0.2.2";
+const char* kVersion = "0.3.0";
 const char* kAppName = "ChromaKey Studio";
 
 QString fmtTime(double s) {
@@ -97,9 +98,12 @@ QSlider* addSlider(QFormLayout* form, const QString& label, int lo, int hi,
 // ---------------------------------------------------------------- PlayThread
 
 PlayThread::PlayThread(const QString& path, QMutex* paramMutex, ck::KeyParams* params,
-                       int outW, int outH, double startT, QObject* parent)
+                       const std::vector<ck::MaskPolygon>* masks,
+                       const ck::MaskSettings* maskSettings, int outW, int outH,
+                       double startT, QObject* parent)
     : QThread(parent), path_(path), paramMutex_(paramMutex), params_(params),
-      outW_(outW), outH_(outH), startT_(startT) {}
+      masks_(masks), maskSettings_(maskSettings), outW_(outW), outH_(outH),
+      startT_(startT) {}
 
 void PlayThread::stop() { stop_ = true; }
 
@@ -118,6 +122,11 @@ void PlayThread::run() {
     }
     const ck::MediaInfo& info = reader.info();
     const double dt = 1.0 / std::max(info.fps, 1.0);
+
+    // 掩码是静态的, 播放开始时算一次
+    ck::MaskLayers layers;
+    if (masks_ && maskSettings_ && !masks_->empty())
+        layers = ck::rasterizeMask(*masks_, outW_, outH_, *maskSettings_);
 
     reader.startSequential(&err);
     // 跳过已播过的帧数, 让顺序流和起点对齐
@@ -138,6 +147,8 @@ void PlayThread::run() {
             p = *params_;
         }
         ck::keyImage(rgb.data.data(), rgb.width, rgb.height, rgb.stride, p, keyed);
+        if (!layers.empty())
+            ck::applyMask(keyed, layers, p.keyR, p.keyG, p.keyB);
         QImage img(keyed.data.data(), keyed.width, keyed.height, keyed.stride,
                    QImage::Format_RGBA8888);
         emit frameReady(img.copy(), t);
@@ -302,6 +313,37 @@ void MainWindow::buildUi() {
     slDespill_ = addSlider(fKey, QStringLiteral("抑制强度"), 0, 100, 85, &lbDespill_);
     lay->addWidget(gKey);
 
+    // ---- 多边形遮罩(垃圾遮罩)
+    auto* gMask = new QGroupBox(QStringLiteral("遮罩（去掉水印/夹具/穿帮）"));
+    auto* fMask = new QFormLayout(gMask);
+    cbMaskEdit_ = new QCheckBox(QStringLiteral("编辑遮罩"));
+    cbMaskEdit_->setToolTip(
+        QStringLiteral("进入后可在画面上点多边形：单击加点，双击或回车闭合"));
+    fMask->addRow(cbMaskEdit_);
+    cmbMaskMode_ = new QComboBox;
+    for (auto m : {ck::MaskMode::Transparent, ck::MaskMode::HoldOut,
+                   ck::MaskMode::FillKey})
+        cmbMaskMode_->addItem(QString::fromUtf8(ck::maskModeLabel(m)),
+                              static_cast<int>(m));
+    cmbMaskMode_->setToolTip(
+        QStringLiteral("新建多边形的模式；选中已有块时修改它"));
+    fMask->addRow(QStringLiteral("类型"), cmbMaskMode_);
+    slMaskFeather_ = addSlider(fMask, QStringLiteral("羽化"), 0, 50, 15, &lbMaskFeather_);
+    slMaskExpand_ = addSlider(fMask, QStringLiteral("外扩/内缩"), -100, 100, 0,
+                              &lbMaskExpand_);
+    lbMaskFeather_->setFixedWidth(38);
+    lbMaskExpand_->setFixedWidth(38);
+    auto* maskBtns = new QHBoxLayout;
+    btnMaskUndo_ = new QPushButton(QStringLiteral("撤销"));
+    btnMaskClear_ = new QPushButton(QStringLiteral("清除全部"));
+    maskBtns->addWidget(btnMaskUndo_);
+    maskBtns->addWidget(btnMaskClear_);
+    fMask->addRow(maskBtns);
+    lbMaskInfo_ = new QLabel(QStringLiteral("还没有遮罩"));
+    lbMaskInfo_->setObjectName(QStringLiteral("hint"));
+    lbMaskInfo_->setWordWrap(true);
+    fMask->addRow(lbMaskInfo_);
+    lay->addWidget(gMask);
     // 预览
     auto* gView = new QGroupBox(QStringLiteral("预览"));
     auto* fView = new QFormLayout(gView);
@@ -455,6 +497,22 @@ void MainWindow::connectSignals() {
     connect(timeline_, &QSlider::valueChanged, this, &MainWindow::onTimelineMoved);
     connect(btnPlay_, &QPushButton::toggled, this, &MainWindow::onPlayToggled);
     connect(themeSwitch_, &ThemeSwitch::modeChanged, this, &MainWindow::setTheme);
+
+    // 遮罩
+    connect(cbMaskEdit_, &QCheckBox::toggled, this, &MainWindow::onMaskEditToggled);
+    connect(cmbMaskMode_, &QComboBox::currentIndexChanged, this,
+            &MainWindow::onMaskModeChanged);
+    connect(slMaskFeather_, &QSlider::valueChanged, this,
+            &MainWindow::onMaskSettingsChanged);
+    connect(slMaskExpand_, &QSlider::valueChanged, this,
+            &MainWindow::onMaskSettingsChanged);
+    connect(btnMaskUndo_, &QPushButton::clicked, this, &MainWindow::undoMask);
+    connect(btnMaskClear_, &QPushButton::clicked, this, &MainWindow::clearMasks);
+    connect(preview_, &PreviewWidget::maskEdited, this, &MainWindow::onMaskEdited);
+    connect(preview_, &PreviewWidget::maskDrawFinished, this,
+            &MainWindow::onMaskDrawFinished);
+    connect(preview_, &PreviewWidget::maskEditStarted, this,
+            &MainWindow::pushMaskUndo);
 }
 
 // ---------------------------------------------------------------- 打开/预览
@@ -514,6 +572,15 @@ bool MainWindow::loadVideo(const QString& path) {
     btnPlay_->setEnabled(true);
     btnExport_->setEnabled(true);
     actExport_->setEnabled(true);
+
+    // 遮罩: 有同名 .ckmask.json 就自动载入
+    masks_.clear();
+    maskHistory_.clear();
+    maskSettings_ = ck::MaskSettings();
+    loadMask();
+    preview_->attachMask(&masks_);
+    previewMaskDirty_ = true;
+    updateMaskInfo();
 
     // 自动匹配一次
     refreshPreview();
@@ -590,6 +657,15 @@ void MainWindow::paintKeyed() {
     if (!loaded_ || srcRgb_.data.empty()) return;
     ck::keyImage(srcRgb_.data.data(), srcRgb_.width, srcRgb_.height, srcRgb_.stride,
                  params_, keyed_);
+    if (!masks_.empty()) {
+        if (previewMaskDirty_ || previewMask_.width != keyed_.width ||
+            previewMask_.height != keyed_.height) {
+            previewMask_ = ck::rasterizeMask(masks_, keyed_.width, keyed_.height,
+                                             maskSettings_);
+            previewMaskDirty_ = false;
+        }
+        ck::applyMask(keyed_, previewMask_, params_.keyR, params_.keyG, params_.keyB);
+    }
     qimg_ = QImage(keyed_.data.data(), keyed_.width, keyed_.height, keyed_.stride,
                    QImage::Format_RGBA8888)
                 .copy();
@@ -669,7 +745,8 @@ void MainWindow::onPlayToggled(bool on) {
         double start = currentT_;
         if (start >= info_.duration - 0.05) start = 0;
         play_ = new PlayThread(QString::fromStdString(info_.path), &paramMutex_, &params_,
-                               previewW_, previewH_, start, this);
+                               &masks_, &maskSettings_, previewW_, previewH_, start,
+                               this);
         connect(play_, &PlayThread::frameReady, this,
                 [this](QImage img, double t) {
                     preview_->setImage(img);
@@ -750,6 +827,8 @@ void MainWindow::startExport() {
     opt.key = collectParams();
     opt.key.neutralize = true;
     opt.includeAudio = cbAudio_->isChecked();
+    opt.masks = masks_;
+    opt.maskSettings = maskSettings_;
 
     exporting_ = true;
     btnExport_->setEnabled(false);
@@ -824,7 +903,12 @@ void MainWindow::showHelp() {
             "2. 点「自动匹配背景」——多数素材到这一步就干净了\n"
             "3. 还不干净就调「容差」：背景有残留往大调，主体被吃掉往小调\n"
             "4. 边缘发毛就开「空间羽化」；发丝泛绿就保持「溢色抑制」开启\n"
-            "5. 选格式，点「开始导出」\n\n"
+            "5. 背景上有水印 / 夹具 / 接缝去不掉？勾「编辑遮罩」，\n"
+            "   在画面上点几个点把那一块圈起来（单击加点，双击或回车闭合）。\n"
+            "   类型：强制透明=挖掉；强制保留=保住主体；填充键色=先涂绿再抠。\n"
+            "   羽化让边缘自然，外扩/内缩用来吃掉水印的光晕。\n"
+            "   遮罩会自动存成同名 .ckmask.json，下次打开自动载入。\n"
+            "6. 选格式，点「开始导出」\n\n"
             "空格 = 播放/停止，拖时间轴可以看任意一帧。\n"
             "预览是缩小后的画面，导出用原分辨率。\n\n"
             "给 QtAVPlayer / pet_player 用：MOV 直接可播；\\n"
@@ -856,6 +940,7 @@ void MainWindow::dropEvent(QDropEvent* e) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* e) {
+    saveMask();
     if (play_) {
         play_->stop();
         play_->wait(3000);
@@ -865,4 +950,154 @@ void MainWindow::closeEvent(QCloseEvent* e) {
         exporter_->wait(5000);
     }
     e->accept();
+}
+
+// ---------------------------------------------------------------- 多边形遮罩
+
+void MainWindow::onMaskEditToggled(bool on) {
+    if (on && !loaded_) {
+        cbMaskEdit_->setChecked(false);
+        statusBar()->showMessage(QStringLiteral("先打开一个视频"), 4000);
+        return;
+    }
+    preview_->setMaskEditMode(on);
+    if (on) {
+        statusBar()->showMessage(
+            QStringLiteral("遮罩编辑：单击加点，双击或回车闭合，Esc 取消"), 8000);
+    } else {
+        previewMaskDirty_ = true;
+        paintKeyed();
+        saveMask();
+    }
+    updateMaskInfo();
+}
+
+void MainWindow::onMaskModeChanged(int) {
+    if (!cmbMaskMode_) return;
+    preview_->setNewPolygonMode(
+        static_cast<ck::MaskMode>(cmbMaskMode_->currentData().toInt()));
+    previewMaskDirty_ = true;
+    if (loaded_) paintKeyed();
+    saveMask();
+}
+
+void MainWindow::onMaskSettingsChanged() {
+    maskSettings_.featherPx = slMaskFeather_->value() / 10.0f;
+    maskSettings_.expandPx = slMaskExpand_->value() / 10.0f;
+    if (lbMaskFeather_)
+        lbMaskFeather_->setText(QString::number(maskSettings_.featherPx, 'f', 1));
+    if (lbMaskExpand_)
+        lbMaskExpand_->setText(QString::number(maskSettings_.expandPx, 'f', 1));
+    previewMaskDirty_ = true;
+    if (loaded_) paintKeyed();
+    QTimer::singleShot(400, this, [this] { saveMask(); });
+}
+
+void MainWindow::onMaskEdited() {
+    if (preview_) preview_->update();
+    updateMaskInfo();
+    QTimer::singleShot(400, this, [this] { saveMask(); });
+}
+
+void MainWindow::onMaskDrawFinished() {
+    previewMaskDirty_ = true;
+    if (loaded_) paintKeyed();
+    updateMaskInfo();
+    saveMask();
+}
+
+void MainWindow::pushMaskUndo() {
+    maskHistory_.push_back({masks_, maskSettings_});
+    if (maskHistory_.size() > 100) maskHistory_.erase(maskHistory_.begin());
+    updateMaskInfo();
+}
+
+void MainWindow::undoMask() {
+    if (maskHistory_.empty()) return;
+    masks_ = maskHistory_.back().first;
+    maskSettings_ = maskHistory_.back().second;
+    maskHistory_.pop_back();
+
+    auto sync = [this] {
+        QSignalBlocker b1(slMaskFeather_), b2(slMaskExpand_);
+        slMaskFeather_->setValue(int(std::lround(maskSettings_.featherPx * 10)));
+        slMaskExpand_->setValue(int(std::lround(maskSettings_.expandPx * 10)));
+        lbMaskFeather_->setText(QString::number(maskSettings_.featherPx, 'f', 1));
+        lbMaskExpand_->setText(QString::number(maskSettings_.expandPx, 'f', 1));
+    };
+    sync();
+
+    if (preview_) preview_->setSelectedPolygon(-1);
+    previewMaskDirty_ = true;
+    if (loaded_) paintKeyed();
+    updateMaskInfo();
+    saveMask();
+}
+
+void MainWindow::clearMasks() {
+    if (masks_.empty()) return;
+    pushMaskUndo();
+    masks_.clear();
+    if (preview_) preview_->setSelectedPolygon(-1);
+    previewMaskDirty_ = true;
+    if (loaded_) paintKeyed();
+    updateMaskInfo();
+    saveMask();
+}
+
+void MainWindow::updateMaskInfo() {
+    int blocks = 0, verts = 0;
+    for (const auto& p : masks_) {
+        if (p.points.size() < 3) continue;
+        ++blocks;
+        verts += static_cast<int>(p.points.size());
+    }
+    if (lbMaskInfo_) {
+        if (blocks == 0)
+            lbMaskInfo_->setText(QStringLiteral("还没有遮罩"));
+        else
+            lbMaskInfo_->setText(QStringLiteral("%1 块，共 %2 个顶点").arg(blocks).arg(verts));
+    }
+    if (btnMaskUndo_) btnMaskUndo_->setEnabled(!maskHistory_.empty());
+    if (btnMaskClear_) btnMaskClear_->setEnabled(blocks > 0);
+}
+
+void MainWindow::saveMask() {
+    if (!loaded_) return;
+    const std::string path = ck::defaultMaskPath(info_.path);
+    if (masks_.empty()) {
+        std::remove(path.c_str());
+        return;
+    }
+    FILE* fp = std::fopen(path.c_str(), "wb");
+    if (!fp) return;
+    const std::string json = ck::maskToJson(masks_, maskSettings_);
+    std::fwrite(json.data(), 1, json.size(), fp);
+    std::fclose(fp);
+}
+
+void MainWindow::loadMask() {
+    if (!loaded_ || !slMaskFeather_) return;
+    const std::string path = ck::defaultMaskPath(info_.path);
+    FILE* fp = std::fopen(path.c_str(), "rb");
+    if (!fp) return;
+    std::string text;
+    char buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof(buf), fp)) > 0) text.append(buf, n);
+    std::fclose(fp);
+
+    std::vector<ck::MaskPolygon> polys;
+    ck::MaskSettings s;
+    if (!ck::maskFromJson(text, &polys, &s)) return;
+    masks_ = std::move(polys);
+    maskSettings_ = s;
+    QSignalBlocker b1(slMaskFeather_), b2(slMaskExpand_);
+    slMaskFeather_->setValue(int(std::lround(s.featherPx * 10)));
+    slMaskExpand_->setValue(int(std::lround(s.expandPx * 10)));
+    lbMaskFeather_->setText(QString::number(s.featherPx, 'f', 1));
+    lbMaskExpand_->setText(QString::number(s.expandPx, 'f', 1));
+}
+void MainWindow::setMaskEditEnabledForTest() {
+    if (cbMaskEdit_) cbMaskEdit_->setChecked(true);
 }

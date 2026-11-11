@@ -1,11 +1,12 @@
 // 无界面导出工具: 用来在写 GUI 之前验证整条管线。
 //
-// 用法: ckcli <输入视频> <输出文件> [webm|prores|qt] [similarity] [blend]
+// 用法: ckcli <输入视频> <输出文件> [webm|prores|qt|png] [similarity] [blend] [掩码json]
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
+#include "core/mask.h"
 #include "core/media.h"
 
 static ck::OutFormat parseFormat(const std::string& s) {
@@ -49,6 +50,26 @@ int main(int argc, char** argv) {
     opt.key.despillMix = 0.85f;
     opt.key.spillMatte = true;
     opt.key.neutralize = true;
+
+    // 可选: 第 6 个参数是 .ckmask.json, 用来验证带遮罩的导出
+    if (argc > 6) {
+        FILE* fp = std::fopen(argv[6], "rb");
+        if (!fp) {
+            std::printf("打不开掩码: %s\n", argv[6]);
+            return 1;
+        }
+        std::string text;
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), fp)) > 0) text.append(buf, n);
+        std::fclose(fp);
+        if (!ck::maskFromJson(text, &opt.masks, &opt.maskSettings)) {
+            std::printf("掩码解析失败\n");
+            return 1;
+        }
+        std::printf("掩码: %zu 块  羽化 %.1f  外扩 %.1f\n", opt.masks.size(),
+                    opt.maskSettings.featherPx, opt.maskSettings.expandPx);
+    }
 
     auto result = ck::exportVideo(
         reader, opt,
